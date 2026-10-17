@@ -25,6 +25,7 @@ A API de IA **só lê** o grafo. Este serviço é o **único que escreve** nele.
 | `:Cooperativa:Local` | `cooperativas` + `perfis` + `enderecos` | `id` (cooperativa_id), `nome`, `numero_cooperados`, `score_conformidade` (0–1, média das avaliações ÷ 5; `null` se não houver), `qtd_avaliacoes`, `endereco_id`, `cep`, `cidade`, `bairro`, `lat`, `lng`, `location` (point), `geo_chave` |
 | `:EmpresaCompradora:Local` | `empresas` + `perfis` + `enderecos` | `id` (empresa_id), `nome`, campos de endereço como acima |
 | `:PontoDeColeta:Local` | endereços de `rotas_enderecos` em rotas **ativas** | `id` (endereco_id), `nome` (nome_local), `tipo_local`, `logradouro`, `numero`, campos de endereço |
+| `:Rota` | `rotas` ativas | `id` (rota_id), `coop_id`, `nome`, `esta_ativa`, `qtd_paradas`, `distancia_total_km` |
 | `:Material` | `categorias_materiais` | `id` (categoria_id), `nome` (nome_categoria) |
 | `:SyncRun` | — | registro de cada execução (contadores, duração). Mantém as 30 últimas |
 
@@ -39,6 +40,8 @@ A API de IA **só lê** o grafo. Este serviço é o **único que escreve** nele.
 | `(Material)-[:SUBCATEGORIA_DE]->(Material)` | `categorias_materiais.categoria_pai_id` | — |
 | `(Cooperativa)-[:PROCESSA_MATERIAL]->(Material)` | estoques, movimentações e ofertas | `capacidade_mensal_kg`, `estoque_atual_kg`, `preco_sugerido_medio`, `ofertado` |
 | `(Cooperativa)-[:COLETA_DE]->(PontoDeColeta)` | `rotas` ativas + `rotas_enderecos` | `qtd_rotas`, `rotas` (nomes) |
+| `(Cooperativa)-[:POSSUI_ROTA]->(Rota)` | `rotas` ativas | — |
+| `(Rota)-[:PARADA]->(PontoDeColeta)` | `rotas_enderecos` | `ordem`, `nome_local`, `tipo_local`, `distancia_trecho_km`, `distancia_acumulada_km` |
 | `(PontoDeColeta)-[:FORNECE_MATERIAL]->(Material)` | `triagens` → `coletas` → `rotas_enderecos` | `kg_estimado_periodo`, `qtd_coletas`, `estimado: true` |
 | `(EmpresaCompradora)-[:INTERESSADA_EM]->(Material)` | `empresa_materiais_interesses` | — |
 | `(EmpresaCompradora)-[:FAVORITOU]->(Cooperativa)` | `empresa_cooperativas_favoritas` | `desde` |

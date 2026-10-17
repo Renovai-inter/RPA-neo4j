@@ -195,6 +195,30 @@ SELECT empresa_id::text AS empresa_id, cooperativa_id::text AS coop_id, data_cri
 FROM empresa_cooperativas_favoritas
 """
 
+SQL_ROTAS = """
+SELECT
+    r.rota_id::text        AS id,
+    r.cooperativa_id::text AS coop_id,
+    r.nome                 AS nome,
+    r.esta_ativa           AS esta_ativa
+FROM rotas r
+WHERE r.esta_ativa
+"""
+
+SQL_ROTAS_PARADAS = """
+SELECT
+    re.rota_id::text       AS rota_id,
+    r.cooperativa_id::text AS coop_id,
+    re.endereco_id::text   AS ponto_id,
+    re.nome_local          AS nome_local,
+    re.tipo_local          AS tipo_local,
+    re.ordem               AS ordem
+FROM rotas_enderecos re
+JOIN rotas r ON r.rota_id = re.rota_id
+WHERE r.esta_ativa
+ORDER BY re.rota_id, re.ordem ASC
+"""
+
 
 # ---------------------------------------------------------------------------
 # Execução
@@ -206,6 +230,8 @@ class DadosExtraidos:
     empresas: list[dict[str, Any]] = field(default_factory=list)
     pontos: list[dict[str, Any]] = field(default_factory=list)
     materiais: list[dict[str, Any]] = field(default_factory=list)
+    rotas: list[dict[str, Any]] = field(default_factory=list)
+    rotas_paradas: list[dict[str, Any]] = field(default_factory=list)
     processa: list[dict[str, Any]] = field(default_factory=list)
     coleta_de: list[dict[str, Any]] = field(default_factory=list)
     fornece: list[dict[str, Any]] = field(default_factory=list)
@@ -240,6 +266,8 @@ def extrair(fonte: Fonte, capacidade_janela_meses: int, fornece_janela_dias: int
         empresas=fonte.buscar(sql["empresas"]),
         pontos=fonte.buscar(sql["pontos"]),
         materiais=fonte.buscar(SQL_MATERIAIS),
+        rotas=fonte.buscar(SQL_ROTAS),
+        rotas_paradas=fonte.buscar(SQL_ROTAS_PARADAS),
         processa=fonte.buscar(SQL_PROCESSA_MATERIAL, {"meses": capacidade_janela_meses}),
         coleta_de=fonte.buscar(SQL_COLETA_DE),
         fornece=fonte.buscar(SQL_FORNECE_MATERIAL, {"dias": fornece_janela_dias}),
@@ -248,3 +276,4 @@ def extrair(fonte: Fonte, capacidade_janela_meses: int, fornece_janela_dias: int
     )
     log.info("extraído do Postgres: %s", dados.resumo())
     return dados
+

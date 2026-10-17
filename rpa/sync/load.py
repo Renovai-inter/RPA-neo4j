@@ -19,10 +19,12 @@ from rpa.sync.transform import Payload
 
 log = logging.getLogger(__name__)
 
-ROTULOS_GERENCIADOS = ("Cooperativa", "EmpresaCompradora", "PontoDeColeta", "Material")
+ROTULOS_GERENCIADOS = ("Cooperativa", "EmpresaCompradora", "PontoDeColeta", "Material", "Rota")
 RELACOES_GERENCIADAS = (
     "PROCESSA_MATERIAL",
     "COLETA_DE",
+    "POSSUI_ROTA",
+    "PARADA",
     "FORNECE_MATERIAL",
     "INTERESSADA_EM",
     "FAVORITOU",
@@ -35,6 +37,7 @@ ESQUEMA = [
     "CREATE CONSTRAINT empresa_id IF NOT EXISTS FOR (n:EmpresaCompradora) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT ponto_id IF NOT EXISTS FOR (n:PontoDeColeta) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT material_id IF NOT EXISTS FOR (n:Material) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT rota_id IF NOT EXISTS FOR (n:Rota) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT local_id IF NOT EXISTS FOR (n:Local) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT syncrun_id IF NOT EXISTS FOR (n:SyncRun) REQUIRE n.id IS UNIQUE",
     "CREATE INDEX material_nome IF NOT EXISTS FOR (n:Material) ON (n.nome)",
@@ -48,6 +51,7 @@ PROPS = {
     "Cooperativa": ("nome", "numero_cooperados", "score_conformidade", "qtd_avaliacoes", *_PROPS_ENDERECO),
     "EmpresaCompradora": ("nome", *_PROPS_ENDERECO),
     "PontoDeColeta": ("nome", "tipo_local", "logradouro", "numero", *_PROPS_ENDERECO),
+    "Rota": ("nome", "coop_id", "esta_ativa", "qtd_paradas", "distancia_total_km"),
 }
 
 Q_NO_LOCAL = """
@@ -64,6 +68,12 @@ Q_MATERIAL = """
 UNWIND $linhas AS r
 MERGE (m:Material {id: r.id})
 SET m.nome = r.nome, m.sync_id = $sync_id
+"""
+
+Q_ROTA = """
+UNWIND $linhas AS r
+MERGE (rt:Rota {id: r.id})
+SET rt += r.props, rt.sync_id = $sync_id
 """
 
 Q_RELACAO = """
@@ -172,6 +182,9 @@ class CarregadorNeo4j:
 
         gravados["Material"] = self._escrever(Q_MATERIAL, payload.materiais, sync_id)
 
+        linhas_rotas = [{"id": r["id"], "props": _props(r, PROPS["Rota"])} for r in payload.rotas]
+        gravados["Rota"] = self._escrever(Q_ROTA, linhas_rotas, sync_id)
+
         # Relações
         relacoes = [
             ("SUBCATEGORIA_DE", "Material", "Material",
@@ -184,6 +197,14 @@ class CarregadorNeo4j:
             ("COLETA_DE", "Cooperativa", "PontoDeColeta",
              [{"a": r["coop_id"], "b": r["ponto_id"], "props": _props(r, ("qtd_rotas", "rotas"))}
               for r in payload.coleta_de]),
+            ("POSSUI_ROTA", "Cooperativa", "Rota",
+             [{"a": r["coop_id"], "b": r["rota_id"], "props": {}}
+              for r in payload.possui_rota]),
+            ("PARADA", "Rota", "PontoDeColeta",
+             [{"a": r["rota_id"], "b": r["ponto_id"],
+               "props": _props(r, ("ordem", "nome_local", "tipo_local",
+                                   "distancia_trecho_km", "distancia_acumulada_km"))}
+              for r in payload.paradas]),
             ("FORNECE_MATERIAL", "PontoDeColeta", "Material",
              [{"a": r["ponto_id"], "b": r["material_id"],
                "props": {**_props(r, ("kg_estimado_periodo", "qtd_coletas")), "estimado": True}}

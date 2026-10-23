@@ -46,6 +46,9 @@ class Config:
 
     tamanho_lote: int
 
+    ia_api_url: str = "http://localhost:8000"
+    retreinar_rotas_apos_sync: bool = True
+
     def exigir_neo4j(self) -> None:
         if not self.neo4j_uri or not self.neo4j_password:
             raise RuntimeError("Defina NEO4J_URI e NEO4J_PASSWORD (ou rode com --dry-run).")
@@ -95,4 +98,7 @@ class Config:
             capacidade_janela_meses=int(_env("CAPACIDADE_JANELA_MESES", "3")),
             fornece_janela_dias=int(_env("FORNECE_JANELA_DIAS", "90")),
             tamanho_lote=int(_env("TAMANHO_LOTE", "500")),
+            ia_api_url=_env("IA_API_URL", "http://localhost:8000"),
+            retreinar_rotas_apos_sync=(_env("RETREINAR_ROTAS_APOS_SYNC", "true") or "true").strip().lower()
+            in ("true", "1", "yes", "s", "sim"),
         )

@@ -1,9 +1,10 @@
 """Orquestra o sync Postgres -> Neo4j.
 
 Uso local:
-    python -m sync.main              # sync completo
+    python -m sync.main              # sync completo (com disparo de retreino IA se habilitado)
     python -m sync.main --dry-run    # só extrai e calcula; não escreve no Neo4j
     python -m sync.main --sem-geocode
+    python -m sync.main --sem-retreino
 """
 
 from __future__ import annotations
@@ -23,7 +24,45 @@ from rpa.sync.transform import montar_payload
 log = logging.getLogger("renovai.graph_sync")
 
 
-def run(dry_run: bool = False, sem_geocode: bool = False, permitir_vazio: bool = False) -> dict[str, Any]:
+def disparar_retreino_ia(
+    api_url: str,
+    incluir_csv_base: bool = True,
+    apenas_reais: bool = True,
+    timeout_s: float = 30.0,
+) -> dict[str, Any]:
+    """Aciona o endpoint POST /rotas/retreinar da API de IA para atualizar o modelo supervisionado."""
+    import requests
+
+    endpoint = f"{api_url.rstrip('/')}/rotas/retreinar"
+    payload = {
+        "incluir_csv_base": incluir_csv_base,
+        "apenas_reais": apenas_reais,
+    }
+    log.info("disparando retreino do modelo de rotas na API de IA (%s)...", endpoint)
+    try:
+        resp = requests.post(endpoint, json=payload, timeout=timeout_s)
+        resp.raise_for_status()
+        dados = resp.json()
+        log.info(
+            "retreino IA concluído com sucesso: status=%s, mae=%.2f min, r2=%.4f (amostras: neo4j=%s, csv=%s)",
+            dados.get("status"),
+            dados.get("mae_min", 0.0),
+            dados.get("r2_score", 0.0),
+            dados.get("amostras_neo4j", 0),
+            dados.get("amostras_csv", 0),
+        )
+        return dados
+    except Exception as err:
+        log.warning("falha ao acionar retreino de rotas na API de IA (%s): %s", endpoint, err)
+        return {"status": "falha", "erro": str(err)}
+
+
+def run(
+    dry_run: bool = False,
+    sem_geocode: bool = False,
+    permitir_vazio: bool = False,
+    retreinar_ia: bool | None = None,
+) -> dict[str, Any]:
     from .load import CarregadorNeo4j, novo_sync_id
 
     inicio = time.monotonic()
@@ -86,6 +125,16 @@ def run(dry_run: bool = False, sem_geocode: bool = False, permitir_vazio: bool =
                 for chave, valor in resultado[grupo].items():
                     plano[f"{grupo}_{chave}"] = valor
             carregador.registrar_execucao(sync_id, plano)
+
+        # 5) Disparo opcional de retreinamento do modelo de rotas na IA
+        deve_retreinar = (not dry_run) and (
+            retreinar_ia if retreinar_ia is not None else cfg.retreinar_rotas_apos_sync
+        )
+        if deve_retreinar and cfg.ia_api_url:
+            resultado["retreino_ia"] = disparar_retreino_ia(cfg.ia_api_url)
+        else:
+            resultado["retreino_ia"] = {"status": "ignorado", "motivo": "dry_run ou desabilitado"}
+
     finally:
         if carregador:
             carregador.fechar()
@@ -98,12 +147,18 @@ def _cli() -> None:
     parser = argparse.ArgumentParser(description="Sincroniza o Postgres do Renovaí com o grafo Neo4j.")
     parser.add_argument("--dry-run", action="store_true", help="não escreve no Neo4j")
     parser.add_argument("--sem-geocode", action="store_true", help="não chama APIs de geocodificação")
+    parser.add_argument("--sem-retreino", action="store_true", help="não dispara retreino do modelo na API de IA")
     parser.add_argument("--permitir-vazio", action="store_true", help="permite sync sem cooperativas")
     parser.add_argument("--log", default="INFO", help="nível de log (DEBUG, INFO, WARNING)")
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    resultado = run(dry_run=args.dry_run, sem_geocode=args.sem_geocode, permitir_vazio=args.permitir_vazio)
+    resultado = run(
+        dry_run=args.dry_run,
+        sem_geocode=args.sem_geocode,
+        permitir_vazio=args.permitir_vazio,
+        retreinar_ia=False if args.sem_retreino else None,
+    )
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
 
 

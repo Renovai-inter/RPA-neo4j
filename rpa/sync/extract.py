@@ -276,4 +276,3 @@ def extrair(fonte: Fonte, capacidade_janela_meses: int, fornece_janela_dias: int
     )
     log.info("extraído do Postgres: %s", dados.resumo())
     return dados
-

@@ -3,10 +3,8 @@
 Estratégia "marca e varre":
   - toda execução gera um `sync_id`;
   - cada nó/relação gravado recebe `sync_id` da execução;
-  - ao final (e só se tudo deu certo), apaga nós/relações GERENCIADOS com `sync_id` antigo.
-
-Este serviço é o DONO dos labels e tipos de relação listados em ROTULOS_GERENCIADOS e
-RELACOES_GERENCIADAS: não crie esses elementos à mão, eles serão apagados no próximo sync.
+  - ao final (e só se tudo deu certo), apaga nós/relações GERENCIADOS com `sync_id` antigo,
+    preservando registros criados/enriquecidos pela API de IA (`gerenciado_ia = true` ou `tempo_real_min IS NOT NULL`).
 """
 
 from __future__ import annotations
@@ -51,8 +49,40 @@ PROPS = {
     "Cooperativa": ("nome", "numero_cooperados", "score_conformidade", "qtd_avaliacoes", *_PROPS_ENDERECO),
     "EmpresaCompradora": ("nome", *_PROPS_ENDERECO),
     "PontoDeColeta": ("nome", "tipo_local", "logradouro", "numero", *_PROPS_ENDERECO),
-    "Rota": ("nome", "coop_id", "esta_ativa", "qtd_paradas", "distancia_total_km"),
+    "Rota": (
+        "nome",
+        "coop_id",
+        "esta_ativa",
+        "qtd_paradas",
+        "distancia_total_km",
+        "tempo_total_estimado_min",
+        "tempo_ordem_original_min",
+        "economia_estimada_min",
+        "economia_percentual",
+        "hora_saida",
+    ),
 }
+
+PROPS_PARADA = (
+    "ordem",
+    "ponto_id",
+    "nome_local",
+    "tipo_local",
+    "zona_origem",
+    "zona_destino",
+    "distancia_haversine_km",
+    "distancia_trecho_km",
+    "distancia_acumulada_km",
+    "codigo_zona_origem",
+    "codigo_zona_destino",
+    "mudanca_zona",
+    "fator_retencao",
+    "fator_horario_sp",
+    "hora_saida",
+    "peso_estimado_kg",
+    "tempo_trecho_min",
+    "tempo_acumulado_min",
+)
 
 Q_NO_LOCAL = """
 UNWIND $linhas AS r
@@ -86,14 +116,17 @@ SET x += r.props, x.sync_id = $sync_id
 
 Q_LIMPAR_NOS = """
 MATCH (n:{rotulo})
-WHERE n.sync_id IS NULL OR n.sync_id <> $sync_id
+WHERE (n.sync_id IS NULL OR n.sync_id <> $sync_id)
+  AND coalesce(n.gerenciado_ia, false) = false
 DETACH DELETE n
 RETURN count(*) AS removidos
 """
 
 Q_LIMPAR_RELACOES = """
 MATCH ()-[x:{tipo}]->()
-WHERE x.sync_id IS NULL OR x.sync_id <> $sync_id
+WHERE (x.sync_id IS NULL OR x.sync_id <> $sync_id)
+  AND coalesce(x.gerenciado_ia, false) = false
+  AND x.tempo_real_min IS NULL
 DELETE x
 RETURN count(*) AS removidos
 """
@@ -202,8 +235,7 @@ class CarregadorNeo4j:
               for r in payload.possui_rota]),
             ("PARADA", "Rota", "PontoDeColeta",
              [{"a": r["rota_id"], "b": r["ponto_id"],
-               "props": _props(r, ("ordem", "nome_local", "tipo_local",
-                                   "distancia_trecho_km", "distancia_acumulada_km"))}
+               "props": _props(r, PROPS_PARADA)}
               for r in payload.paradas]),
             ("FORNECE_MATERIAL", "PontoDeColeta", "Material",
              [{"a": r["ponto_id"], "b": r["material_id"],

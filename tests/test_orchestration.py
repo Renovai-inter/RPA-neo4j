@@ -19,9 +19,8 @@ class OrchestrationTest(unittest.TestCase):
         self.assertFalse(pod["automountServiceAccountToken"])
         container = pod["containers"][0]
         self.assertEqual(container["image"], "${ECR_IMAGE}")
-        secret = yaml.safe_load((ROOT / "orchestration/secret.template.yaml").read_text())
-        self.assertEqual(container["envFrom"][0]["secretRef"]["name"], secret["metadata"]["name"])
-        self.assertEqual(job["metadata"]["namespace"], secret["metadata"]["namespace"])
+        self.assertEqual(container["envFrom"][0]["secretRef"]["name"], "rpa-neo4j-secrets")
+        self.assertEqual(job["metadata"]["namespace"], "renovai-api")
 
     def test_release_only_and_image(self):
         workflow = yaml.load((ROOT / ".github/workflows/prod.yml").read_text(), Loader=yaml.BaseLoader)

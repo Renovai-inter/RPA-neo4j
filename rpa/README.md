@@ -104,7 +104,14 @@ Recomendações de segurança:
 
 ---
 
-## Deploy na AWS (EventBridge Scheduler → Lambda)
+## Deploy na AWS
+
+No EKS compartilhado, o workflow `.github/workflows/prod.yml` atualiza o CronJob
+ao publicar uma release estável. Crie previamente o Secret `rpa-neo4j-secrets`
+no namespace `renovai-api`, com as variáveis de conexão de `.env.example`.
+Lambda é uma alternativa: não mantenha os dois agendamentos ativos.
+
+### Alternativa: EventBridge Scheduler → Lambda
 
 ### 1. Gerar o pacote
 

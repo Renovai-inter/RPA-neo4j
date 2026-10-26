@@ -6,3 +6,5 @@ __pycache__/
 package/
 *.zip
 .ipynb_checkpoints/
+
+orchestration/secret.yaml

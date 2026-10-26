@@ -1,0 +1,100 @@
+name: Deploy to AWS EKS
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-aws-prod
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'renovai-rpa-neo4j' }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Validate and test
+        run: |
+          python -m compileall -q rpa
+          python -m unittest discover -s tests -v
+          python -m rpa.sync.main --help
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read EKS version
+        id: cluster
+        run: |
+          VERSION=$(aws eks describe-cluster --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" --query 'cluster.version' --output text)
+          echo "kubectl-version=v${VERSION}.0" >> "$GITHUB_OUTPUT"
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: ${{ steps.cluster.outputs.kubectl-version }}
+
+      - name: Check ECR repository
+        run: aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region "$AWS_REGION" > /dev/null
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: orchestration/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      - name: Configure EKS access
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Check application secret
+        run: kubectl get secret rpa-neo4j-secrets -n renovai-api > /dev/null
+
+      - name: Update CronJob
+        env:
+          ECR_IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          manifest = Path('orchestration/k8s/cronjob.yaml').read_text()
+          assert '${ECR_IMAGE}' in manifest
+          Path(os.environ['RUNNER_TEMP'], 'cronjob.yaml').write_text(
+              manifest.replace('${ECR_IMAGE}', os.environ['ECR_IMAGE'])
+          )
+          PY
+          kubectl apply --dry-run=server -f "$RUNNER_TEMP/cronjob.yaml"
+          kubectl apply -f "$RUNNER_TEMP/cronjob.yaml"
+          kubectl get cronjob rpa-neo4j -n renovai-api

@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: renovai-api
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rpa-neo4j
+  namespace: renovai-api
+spec:
+  schedule: "0 3 * * *"
+  timeZone: America/Sao_Paulo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: rpa-neo4j
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: rpa-neo4j
+              image: "${ECR_IMAGE}"
+              env:
+                - name: IA_API_URL
+                  value: http://ia-api-service
+              envFrom:
+                - secretRef:
+                    name: rpa-neo4j-secrets
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi

@@ -104,7 +104,12 @@ Recomendações de segurança:
 
 ---
 
-## Deploy na AWS (EventBridge Scheduler → Lambda)
+## Deploy na AWS
+
+Para o EKS compartilhado, use [a orquestração por release](../orchestration/README.md).
+Lambda é uma alternativa: não mantenha os dois agendamentos ativos.
+
+### Alternativa: EventBridge Scheduler → Lambda
 
 ### 1. Gerar o pacote
 

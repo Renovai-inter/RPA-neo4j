@@ -1,0 +1,7 @@
+services:
+  rpa-neo4j:
+    build:
+      context: .
+      dockerfile: orchestration/Dockerfile
+    env_file: .env
+    restart: "no"

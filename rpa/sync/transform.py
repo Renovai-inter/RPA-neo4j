@@ -576,6 +576,63 @@ def calcular_score_recomendacao(
 
 
 # ---------------------------------------------------------------------------
+# Tempos reais das viagens (retroalimentam o modelo de rotas da IA)
+# ---------------------------------------------------------------------------
+
+def calcular_tempos_reais(
+    paradas: list[dict[str, Any]],
+    execucoes: list[dict[str, Any]],
+    max_trecho_min: float = 240.0,
+) -> list[dict[str, Any]]:
+    """Tempo real de cada trecho :PARADA, pela hora em que o motorista concluiu cada coleta.
+
+    O trecho até a parada N só vale quando, na viagem, o motorista veio da mesma parada que vem
+    antes de N no grafo (ou saiu da cooperativa, na primeira): as features da aresta descrevem
+    esse trecho. A primeira coleta conta a partir do início da viagem. Trechos sem duração
+    positiva ou acima de ``max_trecho_min`` (viagem esquecida aberta) são descartados.
+    Devolve a média por aresta: [{rota_id, ponto_id, tempo_real_min, amostras}].
+    """
+    anterior_no_grafo: dict[tuple[str, str], str | None] = {}
+    por_rota: dict[str, list[dict[str, Any]]] = {}
+    for p in paradas:
+        por_rota.setdefault(p["rota_id"], []).append(p)
+    for rota_id, lista in por_rota.items():
+        anterior = None
+        for p in sorted(lista, key=lambda x: int(x.get("ordem") or 0)):
+            anterior_no_grafo[(rota_id, p["ponto_id"])] = anterior
+            anterior = p["ponto_id"]
+
+    por_execucao: dict[str, list[dict[str, Any]]] = {}
+    for e in execucoes:
+        por_execucao.setdefault(e["execucao_id"], []).append(e)
+
+    soma: dict[tuple[str, str], list[float]] = {}
+    for linhas in por_execucao.values():
+        linhas = sorted(linhas, key=lambda x: x["data_conclusao"])
+        anterior, hora_anterior = None, linhas[0]["data_inicio"]
+        for e in linhas:
+            chave = (e["rota_id"], e["ponto_id"])
+            minutos = (e["data_conclusao"] - hora_anterior).total_seconds() / 60.0
+            if (
+                chave in anterior_no_grafo
+                and anterior_no_grafo[chave] == anterior
+                and 0.0 < minutos <= max_trecho_min
+            ):
+                soma.setdefault(chave, []).append(minutos)
+            anterior, hora_anterior = e["ponto_id"], e["data_conclusao"]
+
+    return [
+        {
+            "rota_id": rota_id,
+            "ponto_id": ponto_id,
+            "tempo_real_min": round(sum(v) / len(v), 2),
+            "amostras": len(v),
+        }
+        for (rota_id, ponto_id), v in soma.items()
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Payload final para o Neo4j
 # ---------------------------------------------------------------------------
 
@@ -594,6 +651,7 @@ class Payload:
     rotas: list[dict[str, Any]] = field(default_factory=list)
     possui_rota: list[dict[str, Any]] = field(default_factory=list)
     paradas: list[dict[str, Any]] = field(default_factory=list)
+    tempos_reais: list[dict[str, Any]] = field(default_factory=list)
 
     def resumo(self) -> dict[str, int]:
         return {k: len(v) for k, v in self.__dict__.items()}
@@ -642,4 +700,5 @@ def montar_payload(
         rotas=rotas,
         possui_rota=possui_rota,
         paradas=paradas,
+        tempos_reais=calcular_tempos_reais(paradas, dados.execucoes),
     )

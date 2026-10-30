@@ -114,6 +114,14 @@ MERGE (a)-[x:{tipo}]->(b)
 SET x += r.props, x.sync_id = $sync_id
 """
 
+# Só grava onde há medição: sem isso um null apagaria o tempo real já registrado na aresta.
+Q_TEMPOS_REAIS = """
+UNWIND $linhas AS r
+MATCH (:Rota {id: r.rota_id})-[x:PARADA]->(:PontoDeColeta {id: r.ponto_id})
+SET x.tempo_real_min = r.tempo_real_min,
+    x.tempo_real_amostras = r.amostras
+"""
+
 Q_LIMPAR_NOS = """
 MATCH (n:{rotulo})
 WHERE (n.sync_id IS NULL OR n.sync_id <> $sync_id)
@@ -254,6 +262,9 @@ class CarregadorNeo4j:
         for tipo, rotulo_a, rotulo_b, linhas in relacoes:
             q = Q_RELACAO.format(rotulo_a=rotulo_a, rotulo_b=rotulo_b, tipo=tipo)
             gravados[tipo] = self._escrever(q, linhas, sync_id)
+
+        # Depois das arestas :PARADA (o MATCH precisa delas)
+        gravados["tempos_reais"] = self._escrever(Q_TEMPOS_REAIS, payload.tempos_reais, sync_id)
 
         log.info("gravado no Neo4j: %s", gravados)
         return gravados

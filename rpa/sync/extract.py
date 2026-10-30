@@ -220,6 +220,32 @@ ORDER BY re.rota_id, re.ordem ASC
 """
 
 
+# Viagens que o motorista fez (gravadas pela API-Redis ao finalizar). As colunas endereco_id e
+# data_conclusao só existem depois da versão da API-Redis que registra a hora de cada coleta.
+SQL_TEM_TEMPOS_EXECUCAO = """
+SELECT COUNT(*) = 2 AS tem
+FROM information_schema.columns
+WHERE table_name = 'rota_execucoes_paradas' AND column_name IN ('endereco_id', 'data_conclusao')
+"""
+
+SQL_TEMPOS_EXECUCAO = """
+SELECT
+    e.execucao_id::text  AS execucao_id,
+    e.rota_id::text      AS rota_id,
+    e.data_inicio        AS data_inicio,
+    p.endereco_id::text  AS ponto_id,
+    p.data_conclusao     AS data_conclusao
+FROM rota_execucoes e
+JOIN rota_execucoes_paradas p ON p.execucao_id = e.execucao_id
+WHERE p.status = 'CONCLUIDA'
+  AND p.endereco_id IS NOT NULL
+  AND p.data_conclusao IS NOT NULL
+  AND e.data_inicio IS NOT NULL
+  AND e.data_finalizacao >= NOW() - make_interval(days => %(dias)s::int)
+ORDER BY e.execucao_id, p.data_conclusao
+"""
+
+
 # ---------------------------------------------------------------------------
 # Execução
 # ---------------------------------------------------------------------------
@@ -237,6 +263,7 @@ class DadosExtraidos:
     fornece: list[dict[str, Any]] = field(default_factory=list)
     interesses: list[dict[str, Any]] = field(default_factory=list)
     favoritas: list[dict[str, Any]] = field(default_factory=list)
+    execucoes: list[dict[str, Any]] = field(default_factory=list)
 
     def resumo(self) -> dict[str, int]:
         return {k: len(v) for k, v in self.__dict__.items()}
@@ -273,6 +300,11 @@ def extrair(fonte: Fonte, capacidade_janela_meses: int, fornece_janela_dias: int
         fornece=fonte.buscar(SQL_FORNECE_MATERIAL, {"dias": fornece_janela_dias}),
         interesses=fonte.buscar(SQL_INTERESSES),
         favoritas=fonte.buscar(SQL_FAVORITAS),
+        execucoes=(
+            fonte.buscar(SQL_TEMPOS_EXECUCAO, {"dias": fornece_janela_dias})
+            if fonte.buscar(SQL_TEM_TEMPOS_EXECUCAO)[0]["tem"]
+            else []
+        ),
     )
     log.info("extraído do Postgres: %s", dados.resumo())
     return dados
